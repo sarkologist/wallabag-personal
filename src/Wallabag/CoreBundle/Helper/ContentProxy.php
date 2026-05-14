@@ -27,8 +27,9 @@ class ContentProxy
     protected $eventDispatcher;
     protected $storeArticleHeaders;
     protected $pdfContentFormatter;
+    protected $directPdfContentFetcher;
 
-    public function __construct(Graby $graby, RuleBasedTagger $tagger, RuleBasedIgnoreOriginProcessor $ignoreOriginProcessor, ValidatorInterface $validator, LoggerInterface $logger, $fetchingErrorMessage, $storeArticleHeaders = false, ?PdfContentFormatter $pdfContentFormatter = null)
+    public function __construct(Graby $graby, RuleBasedTagger $tagger, RuleBasedIgnoreOriginProcessor $ignoreOriginProcessor, ValidatorInterface $validator, LoggerInterface $logger, $fetchingErrorMessage, $storeArticleHeaders = false, ?PdfContentFormatter $pdfContentFormatter = null, ?DirectPdfContentFetcher $directPdfContentFetcher = null)
     {
         $this->graby = $graby;
         $this->tagger = $tagger;
@@ -39,6 +40,7 @@ class ContentProxy
         $this->fetchingErrorMessage = $fetchingErrorMessage;
         $this->storeArticleHeaders = $storeArticleHeaders;
         $this->pdfContentFormatter = $pdfContentFormatter ?: new PdfContentFormatter();
+        $this->directPdfContentFetcher = $directPdfContentFetcher ?: new DirectPdfContentFetcher();
     }
 
     /**
@@ -57,7 +59,7 @@ class ContentProxy
         }
 
         if ((empty($content) || false === $this->validateContent($content)) && false === $disableContentUpdate) {
-            $fetchedContent = $this->graby->fetchContent($url);
+            $fetchedContent = $this->fetchContent($url);
 
             $fetchedContent['title'] = $this->sanitizeContentTitle(
                 $fetchedContent['title'],
@@ -241,6 +243,42 @@ class ContentProxy
         mb_substitute_character('none');
 
         return mb_convert_encoding($rawText, 'UTF-8', 'UTF-8');
+    }
+
+    private function fetchContent($url)
+    {
+        try {
+            return $this->graby->fetchContent($url);
+        } catch (\Throwable $e) {
+            if (!$this->directPdfContentFetcher->supports($url)) {
+                $this->throwFetchFailure($e);
+            }
+
+            $this->logger->warning('Graby failed while fetching a direct PDF. Retrying with the direct PDF fetcher.', [
+                'exception' => $e,
+                'url' => $url,
+            ]);
+
+            try {
+                return $this->directPdfContentFetcher->fetch($url);
+            } catch (\Throwable $fallbackException) {
+                $this->logger->warning('Direct PDF fetch fallback failed.', [
+                    'exception' => $fallbackException,
+                    'url' => $url,
+                ]);
+
+                $this->throwFetchFailure($e);
+            }
+        }
+    }
+
+    private function throwFetchFailure(\Throwable $e)
+    {
+        if ($e instanceof \Exception) {
+            throw $e;
+        }
+
+        throw new \RuntimeException($e->getMessage(), 0, $e);
     }
 
     /**

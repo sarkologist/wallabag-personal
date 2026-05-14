@@ -12,6 +12,7 @@ use Symfony\Component\Validator\ConstraintViolationList;
 use Symfony\Component\Validator\Validator\RecursiveValidator;
 use Wallabag\CoreBundle\Entity\Entry;
 use Wallabag\CoreBundle\Helper\ContentProxy;
+use Wallabag\CoreBundle\Helper\DirectPdfContentFetcher;
 use Wallabag\CoreBundle\Helper\RuleBasedIgnoreOriginProcessor;
 use Wallabag\CoreBundle\Helper\RuleBasedTagger;
 use Wallabag\CoreBundle\Tools\Utils;
@@ -174,6 +175,62 @@ class ContentProxyTest extends TestCase
         $this->assertSame($expectedContent, $entry->getContent());
         $this->assertSame(Utils::getReadingTime($expectedContent), $entry->getReadingTime());
         $this->assertSame('application/pdf', $entry->getMimetype());
+    }
+
+    public function testDirectPdfFallbackIsUsedWhenGrabyFails()
+    {
+        $tagger = $this->getTaggerMock();
+        $tagger->expects($this->once())
+            ->method('tag');
+
+        $ruleBasedIgnoreOriginProcessor = $this->getRuleBasedIgnoreOriginProcessorMock();
+
+        $graby = new class() extends Graby {
+            public function __construct()
+            {
+            }
+
+            public function toggleImgNoReferrer($toggle)
+            {
+            }
+
+            public function fetchContent($url)
+            {
+                throw new \RuntimeException('Blocked by bot stopper');
+            }
+        };
+
+        $directPdfContentFetcher = $this->getMockBuilder(DirectPdfContentFetcher::class)
+            ->setMethods(['supports', 'fetch'])
+            ->getMock();
+
+        $directPdfContentFetcher->expects($this->once())
+            ->method('supports')
+            ->with('http://domain.io/document.pdf')
+            ->willReturn(true);
+
+        $directPdfContentFetcher->expects($this->once())
+            ->method('fetch')
+            ->with('http://domain.io/document.pdf')
+            ->willReturn([
+                'html' => 'First<br />Second',
+                'title' => 'Fallback PDF',
+                'url' => 'http://domain.io/document.pdf',
+                'headers' => [
+                    'content-type' => 'application/pdf',
+                ],
+                'language' => '',
+                'status' => 200,
+            ]);
+
+        $proxy = new ContentProxy($graby, $tagger, $ruleBasedIgnoreOriginProcessor, $this->getValidator(), $this->getLogger(), $this->fetchingErrorMessage, false, null, $directPdfContentFetcher);
+        $entry = new Entry(new User());
+        $proxy->updateEntry($entry, 'http://domain.io/document.pdf');
+
+        $this->assertSame('Fallback PDF', $entry->getTitle());
+        $this->assertSame('<p>First Second</p>', $entry->getContent());
+        $this->assertSame('application/pdf', $entry->getMimetype());
+        $this->assertSame(200, $entry->getHttpStatus());
     }
 
     public function testWithContent()
