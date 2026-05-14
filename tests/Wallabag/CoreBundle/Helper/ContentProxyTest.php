@@ -14,6 +14,7 @@ use Wallabag\CoreBundle\Entity\Entry;
 use Wallabag\CoreBundle\Helper\ContentProxy;
 use Wallabag\CoreBundle\Helper\RuleBasedIgnoreOriginProcessor;
 use Wallabag\CoreBundle\Helper\RuleBasedTagger;
+use Wallabag\CoreBundle\Tools\Utils;
 use Wallabag\UserBundle\Entity\User;
 
 class ContentProxyTest extends TestCase
@@ -138,6 +139,41 @@ class ContentProxyTest extends TestCase
         $this->assertEmpty($entry->getMimetype());
         $this->assertSame(0.0, $entry->getReadingTime());
         $this->assertSame('domain.io', $entry->getDomainName());
+    }
+
+    public function testPdfContentIsFormattedBeforeStorage()
+    {
+        $tagger = $this->getTaggerMock();
+        $tagger->expects($this->once())
+            ->method('tag');
+
+        $ruleBasedIgnoreOriginProcessor = $this->getRuleBasedIgnoreOriginProcessorMock();
+
+        $graby = $this->getMockBuilder(Graby::class)
+            ->setMethods(['fetchContent'])
+            ->disableOriginalConstructor()
+            ->getMock();
+
+        $graby->expects($this->any())
+            ->method('fetchContent')
+            ->willReturn([
+                'html' => 'recent-<br />ly<br /><br />Second & <script>bad</script><br />line.',
+                'title' => 'PDF',
+                'url' => 'http://domain.io/document.pdf',
+                'headers' => [
+                    'content-type' => 'application/pdf',
+                ],
+                'language' => '',
+            ]);
+
+        $proxy = new ContentProxy($graby, $tagger, $ruleBasedIgnoreOriginProcessor, $this->getValidator(), $this->getLogger(), $this->fetchingErrorMessage);
+        $entry = new Entry(new User());
+        $proxy->updateEntry($entry, 'http://domain.io/document.pdf');
+
+        $expectedContent = '<p>recently</p><p>Second &amp; &lt;script&gt;bad&lt;/script&gt; line.</p>';
+        $this->assertSame($expectedContent, $entry->getContent());
+        $this->assertSame(Utils::getReadingTime($expectedContent), $entry->getReadingTime());
+        $this->assertSame('application/pdf', $entry->getMimetype());
     }
 
     public function testWithContent()

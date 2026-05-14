@@ -9,6 +9,7 @@ use Twig\Extension\GlobalsInterface;
 use Twig\TwigFilter;
 use Twig\TwigFunction;
 use Wallabag\AnnotationBundle\Repository\AnnotationRepository;
+use Wallabag\CoreBundle\Helper\PdfContentFormatter;
 use Wallabag\CoreBundle\Repository\EntryRepository;
 use Wallabag\CoreBundle\Repository\TagRepository;
 use Wallabag\UserBundle\Entity\User;
@@ -22,8 +23,9 @@ class WallabagExtension extends AbstractExtension implements GlobalsInterface
     private $lifeTime;
     private $translator;
     private $projectDir;
+    private $pdfContentFormatter;
 
-    public function __construct(EntryRepository $entryRepository, AnnotationRepository $annotationRepository, TagRepository $tagRepository, TokenStorageInterface $tokenStorage, $lifeTime, TranslatorInterface $translator, string $projectDir)
+    public function __construct(EntryRepository $entryRepository, AnnotationRepository $annotationRepository, TagRepository $tagRepository, TokenStorageInterface $tokenStorage, $lifeTime, TranslatorInterface $translator, string $projectDir, ?PdfContentFormatter $pdfContentFormatter = null)
     {
         $this->entryRepository = $entryRepository;
         $this->annotationRepository = $annotationRepository;
@@ -32,6 +34,7 @@ class WallabagExtension extends AbstractExtension implements GlobalsInterface
         $this->lifeTime = $lifeTime;
         $this->translator = $translator;
         $this->projectDir = $projectDir;
+        $this->pdfContentFormatter = $pdfContentFormatter ?: new PdfContentFormatter();
     }
 
     public function getGlobals(): array
@@ -45,6 +48,7 @@ class WallabagExtension extends AbstractExtension implements GlobalsInterface
             new TwigFilter('removeWww', [$this, 'removeWww']),
             new TwigFilter('removeScheme', [$this, 'removeScheme']),
             new TwigFilter('removeSchemeAndWww', [$this, 'removeSchemeAndWww']),
+            new TwigFilter('pdfContent', [$this, 'pdfContent']),
         ];
     }
 
@@ -72,6 +76,11 @@ class WallabagExtension extends AbstractExtension implements GlobalsInterface
     public function removeSchemeAndWww($url)
     {
         return $this->removeWww($this->removeScheme($url));
+    }
+
+    public function pdfContent($content, $mimetype)
+    {
+        return $this->pdfContentFormatter->format($content, $mimetype);
     }
 
     /**

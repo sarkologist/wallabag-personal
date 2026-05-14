@@ -324,7 +324,7 @@
 
         </aside>
         <article{% if entry.language is defined and entry.language is not null %} lang="{{ entry.getHTMLLanguage() }}"{% endif %}>
-            {{ entry.content|raw }}
+            {{ entry.content|pdfContent(entry.mimetype)|raw }}
         </article>
 
         <div class="fixed-action-btn js-fixed-action-btn horizontal click-to-toggle hide-on-large-only">

@@ -26,8 +26,9 @@ class ContentProxy
     protected $fetchingErrorMessage;
     protected $eventDispatcher;
     protected $storeArticleHeaders;
+    protected $pdfContentFormatter;
 
-    public function __construct(Graby $graby, RuleBasedTagger $tagger, RuleBasedIgnoreOriginProcessor $ignoreOriginProcessor, ValidatorInterface $validator, LoggerInterface $logger, $fetchingErrorMessage, $storeArticleHeaders = false)
+    public function __construct(Graby $graby, RuleBasedTagger $tagger, RuleBasedIgnoreOriginProcessor $ignoreOriginProcessor, ValidatorInterface $validator, LoggerInterface $logger, $fetchingErrorMessage, $storeArticleHeaders = false, ?PdfContentFormatter $pdfContentFormatter = null)
     {
         $this->graby = $graby;
         $this->tagger = $tagger;
@@ -37,6 +38,7 @@ class ContentProxy
         $this->mimeTypes = new MimeTypes();
         $this->fetchingErrorMessage = $fetchingErrorMessage;
         $this->storeArticleHeaders = $storeArticleHeaders;
+        $this->pdfContentFormatter = $pdfContentFormatter ?: new PdfContentFormatter();
     }
 
     /**
@@ -266,6 +268,11 @@ class ContentProxy
                 $content['html'] .= $content['description'];
             }
         }
+
+        $content['html'] = $this->pdfContentFormatter->format(
+            $content['html'],
+            isset($content['headers']['content-type']) ? $content['headers']['content-type'] : null
+        );
 
         $entry->setContent($content['html']);
         $entry->setReadingTime(Utils::getReadingTime($content['html']));
