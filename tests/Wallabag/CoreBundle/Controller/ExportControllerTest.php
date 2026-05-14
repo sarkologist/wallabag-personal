@@ -102,6 +102,49 @@ class ExportControllerTest extends WallabagCoreTestCase
         $this->assertSame('binary', $headers->get('content-transfer-encoding'));
     }
 
+    public function testEpubExportFormatsPdfContent()
+    {
+        if (!class_exists(\ZipArchive::class)) {
+            $this->markTestSkipped('The zip extension is required to inspect EPUB content.');
+        }
+
+        $this->logInAs('admin');
+        $client = $this->getTestClient();
+        $em = $this->getEntityManager();
+        $user = $client->getContainer()
+            ->get('wallabag_user.user_repository.test')
+            ->findOneByUserName('admin');
+
+        $entry = new Entry($user);
+        $entry->setUrl('http://0.0.0.0/pdf-export-content');
+        $entry->setTitle('PDF export content');
+        $entry->setContent('First<br />line<br /><br />Second<br />line');
+        $entry->setMimetype('application/pdf');
+
+        $em->persist($entry);
+        $em->flush();
+        $entryId = $entry->getId();
+
+        try {
+            ob_start();
+            $client->request('GET', '/export/' . $entryId . '.epub');
+            ob_end_clean();
+
+            $this->assertSame(200, $client->getResponse()->getStatusCode());
+
+            $html = $this->extractHtmlFromEpub($client->getResponse()->getContent());
+            $this->assertStringContainsString('<p>First line</p>', $html);
+            $this->assertStringContainsString('<p>Second line</p>', $html);
+            $this->assertStringNotContainsString('First<br />line', $html);
+        } finally {
+            $entry = $this->getEntityManager()->getRepository(Entry::class)->find($entryId);
+            if (null !== $entry) {
+                $this->getEntityManager()->remove($entry);
+                $this->getEntityManager()->flush();
+            }
+        }
+    }
+
     public function testMobiExport()
     {
         $this->logInAs('admin');
@@ -388,5 +431,36 @@ class ExportControllerTest extends WallabagCoreTestCase
         $transliterator = \Transliterator::createFromRules(':: Any-Latin; :: Latin-ASCII; :: NFD; :: [:Nonspacing Mark:] Remove; :: NFC;', \Transliterator::FORWARD);
 
         return preg_replace('/[^A-Za-z0-9\- \']/', '', $transliterator->transliterate($title));
+    }
+
+    private function extractHtmlFromEpub($content)
+    {
+        $epub = tempnam(sys_get_temp_dir(), 'wallabag-epub-');
+        file_put_contents($epub, $content);
+
+        $zip = new \ZipArchive();
+        $html = '';
+        $opened = false;
+
+        try {
+            $opened = true === $zip->open($epub);
+            $this->assertTrue($opened, 'Unable to open generated EPUB.');
+
+            for ($i = 0; $i < $zip->numFiles; ++$i) {
+                $filename = $zip->getNameIndex($i);
+                if (!preg_match('/\.html$/', $filename)) {
+                    continue;
+                }
+
+                $html .= $zip->getFromIndex($i);
+            }
+        } finally {
+            if ($opened) {
+                $zip->close();
+            }
+            unlink($epub);
+        }
+
+        return $html;
     }
 }

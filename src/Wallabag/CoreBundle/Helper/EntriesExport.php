@@ -26,6 +26,7 @@ class EntriesExport
     private $entries = [];
     private $author = 'wallabag';
     private $language = '';
+    private $pdfContentFormatter;
 
     /**
      * @param TranslatorInterface   $translator   Translator service
@@ -33,12 +34,13 @@ class EntriesExport
      * @param string                $logoPath     Path to the logo FROM THE BUNDLE SCOPE
      * @param TokenStorageInterface $tokenStorage Needed to retrieve the current user
      */
-    public function __construct(TranslatorInterface $translator, $wallabagUrl, $logoPath, TokenStorageInterface $tokenStorage)
+    public function __construct(TranslatorInterface $translator, $wallabagUrl, $logoPath, TokenStorageInterface $tokenStorage, ?PdfContentFormatter $pdfContentFormatter = null)
     {
         $this->translator = $translator;
         $this->wallabagUrl = $wallabagUrl;
         $this->logoPath = $logoPath;
         $this->tokenStorage = $tokenStorage;
+        $this->pdfContentFormatter = $pdfContentFormatter ?: new PdfContentFormatter();
     }
 
     /**
@@ -223,7 +225,7 @@ class EntriesExport
                 '</dl>' .
                 $bookEnd;
             $book->addChapter("Entry {$i} of {$entryCount}", "{$filename}_cover.html", $titlepage, true, EPub::EXTERNAL_REF_ADD);
-            $chapter = $content_start . $entry->getContent() . $bookEnd;
+            $chapter = $content_start . $this->getDisplayContent($entry) . $bookEnd;
 
             $entryIds[] = $entry->getId();
             $book->addChapter($entry->getTitle(), "{$filename}.html", $chapter, true, EPub::EXTERNAL_REF_ADD);
@@ -497,6 +499,11 @@ class EntriesExport
             $format,
             SerializationContext::create()->setGroups(['entries_for_user'])
         );
+    }
+
+    private function getDisplayContent(Entry $entry)
+    {
+        return $this->pdfContentFormatter->format($entry->getContent(), $entry->getMimetype());
     }
 
     /**
