@@ -127,6 +127,20 @@ class Config
     private $displayThumbnails;
 
     /**
+     * @var bool
+     *
+     * @ORM\Column(name="kindle_sync_enabled", type="boolean", nullable=false, options={"default" = false})
+     */
+    private $kindleSyncEnabled = false;
+
+    /**
+     * @var string|null
+     *
+     * @ORM\Column(name="kindle_sync_directory", type="text", nullable=true)
+     */
+    private $kindleSyncDirectory;
+
+    /**
      * @ORM\OneToOne(targetEntity="Wallabag\UserBundle\Entity\User", inversedBy="config")
      */
     private $user;
@@ -385,6 +399,53 @@ class Config
     public function setDisplayThumbnails(bool $displayThumbnails)
     {
         $this->displayThumbnails = $displayThumbnails;
+
+        return $this;
+    }
+
+    /**
+     * @return bool
+     */
+    public function isKindleSyncEnabled()
+    {
+        return (bool) $this->kindleSyncEnabled;
+    }
+
+    /**
+     * @return bool
+     */
+    public function getKindleSyncEnabled()
+    {
+        return $this->isKindleSyncEnabled();
+    }
+
+    /**
+     * @return Config
+     */
+    public function setKindleSyncEnabled(bool $kindleSyncEnabled)
+    {
+        $this->kindleSyncEnabled = $kindleSyncEnabled;
+
+        return $this;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getKindleSyncDirectory()
+    {
+        return $this->kindleSyncDirectory;
+    }
+
+    /**
+     * @param string|null $kindleSyncDirectory
+     *
+     * @return Config
+     */
+    public function setKindleSyncDirectory($kindleSyncDirectory)
+    {
+        $kindleSyncDirectory = null === $kindleSyncDirectory ? null : trim($kindleSyncDirectory);
+        $this->kindleSyncDirectory = '' === $kindleSyncDirectory ? null : $kindleSyncDirectory;
 
         return $this;
     }

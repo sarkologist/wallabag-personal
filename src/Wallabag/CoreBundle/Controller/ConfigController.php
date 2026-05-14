@@ -33,6 +33,7 @@ use Wallabag\CoreBundle\Form\Type\IgnoreOriginUserRuleType;
 use Wallabag\CoreBundle\Form\Type\TaggingRuleImportType;
 use Wallabag\CoreBundle\Form\Type\TaggingRuleType;
 use Wallabag\CoreBundle\Form\Type\UserInformationType;
+use Wallabag\CoreBundle\Helper\KindleSync;
 use Wallabag\CoreBundle\Helper\Redirect;
 use Wallabag\CoreBundle\Repository\ConfigRepository;
 use Wallabag\CoreBundle\Repository\EntryRepository;
@@ -66,18 +67,31 @@ class ConfigController extends AbstractController
     /**
      * @Route("/config", name="config")
      */
-    public function indexAction(Request $request, Config $craueConfig, TaggingRuleRepository $taggingRuleRepository, IgnoreOriginUserRuleRepository $ignoreOriginUserRuleRepository, UserRepository $userRepository)
+    public function indexAction(Request $request, Config $craueConfig, TaggingRuleRepository $taggingRuleRepository, IgnoreOriginUserRuleRepository $ignoreOriginUserRuleRepository, UserRepository $userRepository, KindleSync $kindleSync)
     {
         $config = $this->getConfig();
         $user = $this->getUser();
+        $wasKindleSyncEnabled = $config->isKindleSyncEnabled();
+        $previousKindleSyncDirectory = $config->getKindleSyncDirectory();
 
         // handle basic config detail (this form is defined as a service)
         $configForm = $this->createForm(ConfigType::class, $config, ['action' => $this->generateUrl('config')]);
         $configForm->handleRequest($request);
 
         if ($configForm->isSubmitted() && $configForm->isValid()) {
+            $shouldBackfillKindleSync = $config->isKindleSyncEnabled()
+                && (!$wasKindleSyncEnabled || $previousKindleSyncDirectory !== $config->getKindleSyncDirectory());
+
             $this->entityManager->persist($config);
             $this->entityManager->flush();
+
+            if ($shouldBackfillKindleSync) {
+                $summary = $kindleSync->backfillUnreadForConfig($config);
+                $this->addFlash(
+                    'notice',
+                    sprintf('Kindle sync backfill: %d exported, %d skipped, %d failed.', $summary['exported'], $summary['skipped'], $summary['failed'])
+                );
+            }
 
             $request->getSession()->set('_locale', $config->getLanguage());
 

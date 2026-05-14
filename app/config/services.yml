@@ -302,6 +302,10 @@ services:
         tags:
             - { name: console.command, command: 'wallabag:export' }
 
+    Wallabag\CoreBundle\Command\KoreaderSyncCommand:
+        tags:
+            - { name: console.command, command: 'wallabag:koreader:sync' }
+
     Wallabag\CoreBundle\Command\GenerateUrlHashesCommand:
         tags:
             - { name: console.command, command: 'wallabag:generate-hashed-urls' }

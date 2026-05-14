@@ -136,9 +136,6 @@ class EntriesExport
      */
     private function produceEpub()
     {
-        $user = $this->tokenStorage->getToken() ? $this->tokenStorage->getToken()->getUser() : null;
-        \assert($user instanceof User);
-
         /*
          * Start and End of the book
          */

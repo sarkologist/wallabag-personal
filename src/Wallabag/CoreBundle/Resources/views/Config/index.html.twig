@@ -51,6 +51,32 @@
                             </div>
                         </div>
 
+                        <div class="row">
+                            <div class="input-field col s11 settings-checkbox-col">
+                                {{ form_errors(form.config.kindle_sync_enabled) }}
+                                {{ form_widget(form.config.kindle_sync_enabled) }}
+                                {{ form_label(form.config.kindle_sync_enabled, null, {'label_attr': {'class': 'settings-checkbox-label'}}) }}
+                            </div>
+                            <div class="input-field col s1">
+                                <a href="#" class="tooltipped" data-position="left" data-delay="50" data-tooltip="{{ 'config.form_settings.help_kindle_sync_enabled'|trans }}">
+                                    <i class="material-icons">live_help</i>
+                                </a>
+                            </div>
+                        </div>
+
+                        <div class="row">
+                            <div class="input-field col s11">
+                                {{ form_errors(form.config.kindle_sync_directory) }}
+                                {{ form_widget(form.config.kindle_sync_directory) }}
+                                {{ form_label(form.config.kindle_sync_directory) }}
+                            </div>
+                            <div class="input-field col s1">
+                                <a href="#" class="tooltipped" data-position="left" data-delay="50" data-tooltip="{{ 'config.form_settings.help_kindle_sync_directory'|trans }}">
+                                    <i class="material-icons">live_help</i>
+                                </a>
+                            </div>
+                        </div>
+
                             <div class="row">
                                 <div class="input-field col s11">
                                     {{ form_errors(form.config.reading_speed) }}

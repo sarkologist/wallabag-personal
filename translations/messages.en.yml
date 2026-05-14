@@ -90,6 +90,10 @@ config:
         help_pocket_consumer_key: Required for Pocket import. You can create it in your Pocket account.
         help_display_thumbnails: You can decide if you want to display or not articles thumbnails. Useful for slow connections.
         display_thumbnails_label: Display articles thumbnails (useful for slow connections).
+        kindle_sync_enabled_label: Export unread articles to KOReader via Syncthing
+        kindle_sync_directory_label: KOReader Syncthing directory
+        help_kindle_sync_enabled: When enabled, wallabag writes one EPUB per unread article into your configured Syncthing folder.
+        help_kindle_sync_directory: Server-local folder watched by Syncthing, for example /Users/sark/kindleSyncthing/wallabag.
     form_feed:
         description: 'Atom feeds provided by wallabag allow you to read your saved articles with your favourite Atom reader. You need to generate a token first.'
         token_label: 'Feed token'

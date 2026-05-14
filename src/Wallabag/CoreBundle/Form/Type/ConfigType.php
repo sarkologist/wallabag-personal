@@ -7,6 +7,7 @@ use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\SubmitType;
+use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 use Wallabag\CoreBundle\Entity\Config;
@@ -33,6 +34,16 @@ class ConfigType extends AbstractType
             ->add('display_thumbnails', CheckboxType::class, [
                 'label' => 'config.form_settings.display_thumbnails_label',
                 'property_path' => 'displayThumbnails',
+                'required' => false,
+            ])
+            ->add('kindle_sync_enabled', CheckboxType::class, [
+                'label' => 'config.form_settings.kindle_sync_enabled_label',
+                'property_path' => 'kindleSyncEnabled',
+                'required' => false,
+            ])
+            ->add('kindle_sync_directory', TextType::class, [
+                'label' => 'config.form_settings.kindle_sync_directory_label',
+                'property_path' => 'kindleSyncDirectory',
                 'required' => false,
             ])
             ->add('reading_speed', IntegerType::class, [
