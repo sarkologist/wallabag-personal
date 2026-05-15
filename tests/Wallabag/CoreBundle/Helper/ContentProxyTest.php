@@ -167,7 +167,19 @@ class ContentProxyTest extends TestCase
                 'language' => '',
             ]);
 
-        $proxy = new ContentProxy($graby, $tagger, $ruleBasedIgnoreOriginProcessor, $this->getValidator(), $this->getLogger(), $this->fetchingErrorMessage);
+        $directPdfContentFetcher = $this->getMockBuilder(DirectPdfContentFetcher::class)
+            ->setMethods(['supports', 'fetch'])
+            ->getMock();
+
+        $directPdfContentFetcher->expects($this->once())
+            ->method('supports')
+            ->with('http://domain.io/document.pdf')
+            ->willReturn(false);
+
+        $directPdfContentFetcher->expects($this->never())
+            ->method('fetch');
+
+        $proxy = new ContentProxy($graby, $tagger, $ruleBasedIgnoreOriginProcessor, $this->getValidator(), $this->getLogger(), $this->fetchingErrorMessage, false, null, $directPdfContentFetcher);
         $entry = new Entry(new User());
         $proxy->updateEntry($entry, 'http://domain.io/document.pdf');
 
@@ -177,7 +189,7 @@ class ContentProxyTest extends TestCase
         $this->assertSame('application/pdf', $entry->getMimetype());
     }
 
-    public function testDirectPdfFallbackIsUsedWhenGrabyFails()
+    public function testDirectPdfFetcherIsPreferredForDirectPdfs()
     {
         $tagger = $this->getTaggerMock();
         $tagger->expects($this->once())
@@ -185,20 +197,13 @@ class ContentProxyTest extends TestCase
 
         $ruleBasedIgnoreOriginProcessor = $this->getRuleBasedIgnoreOriginProcessorMock();
 
-        $graby = new class() extends Graby {
-            public function __construct()
-            {
-            }
+        $graby = $this->getMockBuilder(Graby::class)
+            ->setMethods(['fetchContent'])
+            ->disableOriginalConstructor()
+            ->getMock();
 
-            public function toggleImgNoReferrer($toggle)
-            {
-            }
-
-            public function fetchContent($url)
-            {
-                throw new \RuntimeException('Blocked by bot stopper');
-            }
-        };
+        $graby->expects($this->never())
+            ->method('fetchContent');
 
         $directPdfContentFetcher = $this->getMockBuilder(DirectPdfContentFetcher::class)
             ->setMethods(['supports', 'fetch'])
@@ -231,6 +236,121 @@ class ContentProxyTest extends TestCase
         $this->assertSame('<p>First Second</p>', $entry->getContent());
         $this->assertSame('application/pdf', $entry->getMimetype());
         $this->assertSame(200, $entry->getHttpStatus());
+    }
+
+    public function testGrabyIsUsedWhenPrimaryDirectPdfFetchFails()
+    {
+        $tagger = $this->getTaggerMock();
+        $tagger->expects($this->once())
+            ->method('tag');
+
+        $ruleBasedIgnoreOriginProcessor = $this->getRuleBasedIgnoreOriginProcessorMock();
+
+        $graby = $this->getMockBuilder(Graby::class)
+            ->setMethods(['fetchContent'])
+            ->disableOriginalConstructor()
+            ->getMock();
+
+        $graby->expects($this->once())
+            ->method('fetchContent')
+            ->willReturn([
+                'html' => $this->fetchingErrorMessage,
+                'title' => 'PDF',
+                'url' => 'http://domain.io/document.pdf',
+                'headers' => [],
+                'language' => '',
+                'status' => 500,
+            ]);
+
+        $directPdfContentFetcher = $this->getMockBuilder(DirectPdfContentFetcher::class)
+            ->setMethods(['supports', 'fetch'])
+            ->getMock();
+
+        $directPdfContentFetcher->expects($this->once())
+            ->method('supports')
+            ->with('http://domain.io/document.pdf')
+            ->willReturn(true);
+
+        $directPdfContentFetcher->expects($this->exactly(2))
+            ->method('fetch')
+            ->with('http://domain.io/document.pdf')
+            ->willReturnCallback(static function () {
+                static $calls = 0;
+
+                ++$calls;
+
+                if (1 === $calls) {
+                    throw new \RuntimeException('Temporary direct failure');
+                }
+
+                return [
+                    'html' => 'First<br />Second',
+                    'title' => 'Fallback PDF',
+                    'url' => 'http://domain.io/document.pdf',
+                    'headers' => [
+                        'content-type' => 'application/pdf',
+                    ],
+                    'language' => '',
+                    'status' => 200,
+                ];
+            });
+
+        $proxy = new ContentProxy($graby, $tagger, $ruleBasedIgnoreOriginProcessor, $this->getValidator(), $this->getLogger(), $this->fetchingErrorMessage, false, null, $directPdfContentFetcher);
+        $entry = new Entry(new User());
+        $proxy->updateEntry($entry, 'http://domain.io/document.pdf');
+
+        $this->assertSame('Fallback PDF', $entry->getTitle());
+        $this->assertSame('<p>First Second</p>', $entry->getContent());
+        $this->assertSame('application/pdf', $entry->getMimetype());
+        $this->assertSame(200, $entry->getHttpStatus());
+    }
+
+    public function testFailedDirectPdfFallbackKeepsGrabyFailedContent()
+    {
+        $tagger = $this->getTaggerMock();
+        $tagger->expects($this->once())
+            ->method('tag');
+
+        $ruleBasedIgnoreOriginProcessor = $this->getRuleBasedIgnoreOriginProcessorMock();
+
+        $graby = $this->getMockBuilder(Graby::class)
+            ->setMethods(['fetchContent'])
+            ->disableOriginalConstructor()
+            ->getMock();
+
+        $graby->expects($this->once())
+            ->method('fetchContent')
+            ->willReturn([
+                'html' => $this->fetchingErrorMessage,
+                'title' => 'PDF',
+                'url' => 'http://domain.io/document.pdf',
+                'headers' => [],
+                'language' => '',
+                'status' => 500,
+            ]);
+
+        $directPdfContentFetcher = $this->getMockBuilder(DirectPdfContentFetcher::class)
+            ->setMethods(['supports', 'fetch'])
+            ->getMock();
+
+        $directPdfContentFetcher->expects($this->once())
+            ->method('supports')
+            ->with('http://domain.io/document.pdf')
+            ->willReturn(true);
+
+        $directPdfContentFetcher->expects($this->exactly(2))
+            ->method('fetch')
+            ->with('http://domain.io/document.pdf')
+            ->willThrowException(new \RuntimeException('Still not reachable'));
+
+        $proxy = new ContentProxy($graby, $tagger, $ruleBasedIgnoreOriginProcessor, $this->getValidator(), $this->getLogger(), $this->fetchingErrorMessage, false, null, $directPdfContentFetcher);
+        $entry = new Entry(new User());
+        $proxy->updateEntry($entry, 'http://domain.io/document.pdf');
+
+        $this->assertSame('PDF', $entry->getTitle());
+        $this->assertSame($this->fetchingErrorMessage, $entry->getContent());
+        $this->assertEmpty($entry->getMimetype());
+        $this->assertSame(0.0, $entry->getReadingTime());
     }
 
     public function testWithContent()

@@ -2,10 +2,23 @@
 
 namespace Wallabag\CoreBundle\Helper;
 
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Smalot\PdfParser\Parser as PdfParser;
 
 class DirectPdfContentFetcher
 {
+    private $logger;
+    private $popplerPdfTextExtractor;
+    private $pdfTextNormalizer;
+
+    public function __construct(?LoggerInterface $logger = null, ?PopplerPdfTextExtractor $popplerPdfTextExtractor = null, ?PdfTextNormalizer $pdfTextNormalizer = null)
+    {
+        $this->logger = $logger ?: new NullLogger();
+        $this->popplerPdfTextExtractor = $popplerPdfTextExtractor ?: new PopplerPdfTextExtractor();
+        $this->pdfTextNormalizer = $pdfTextNormalizer ?: new PdfTextNormalizer();
+    }
+
     public function supports($url)
     {
         $path = parse_url((string) $url, \PHP_URL_PATH);
@@ -21,10 +34,36 @@ class DirectPdfContentFetcher
             throw new \RuntimeException(sprintf('Url "%s" did not return a PDF response.', $url));
         }
 
-        $parser = new PdfParser();
-        $pdf = $parser->parseContent($response['body']);
-        $details = $pdf->getDetails();
-        $text = $pdf->getText();
+        $parsedPdf = null;
+        $parserException = null;
+
+        try {
+            $parsedPdf = $this->parsePdfContent($response['body']);
+        } catch (\Throwable $e) {
+            $parserException = $e;
+        }
+
+        $details = $parsedPdf ? $parsedPdf['details'] : [];
+        $text = $parsedPdf ? $parsedPdf['text'] : '';
+
+        try {
+            $popplerText = $this->extractTextWithPoppler($response['body']);
+
+            if ('' !== trim($popplerText)) {
+                $text = $popplerText;
+            }
+        } catch (\Throwable $e) {
+            $this->logger->info('Poppler pdftotext extraction failed. Falling back to the PHP PDF parser.', [
+                'exception' => $e,
+                'url' => $url,
+            ]);
+        }
+
+        if ('' === trim($text) && null !== $parserException) {
+            throw $parserException;
+        }
+
+        $text = $this->pdfTextNormalizer->normalize($text);
 
         $html = mb_convert_encoding(nl2br($text), 'UTF-8', 'UTF-8');
         $html = preg_replace('/[^\x{0009}\x{000a}\x{000d}\x{0020}-\x{D7FF}\x{E000}-\x{FFFD}]+/u', ' ', $html);
@@ -43,7 +82,41 @@ class DirectPdfContentFetcher
         ];
     }
 
+    protected function parsePdfContent($body)
+    {
+        $parser = new PdfParser();
+        $pdf = $parser->parseContent($body);
+
+        return [
+            'details' => $pdf->getDetails(),
+            'text' => $pdf->getText(),
+        ];
+    }
+
+    protected function extractTextWithPoppler($body)
+    {
+        return $this->popplerPdfTextExtractor->extract($body);
+    }
+
     protected function download($url)
+    {
+        try {
+            return $this->downloadWithTlsVerification($url, true);
+        } catch (\RuntimeException $e) {
+            if (0 !== strpos((string) $url, 'https://')) {
+                throw $e;
+            }
+
+            $this->logger->warning('Verified direct PDF download failed. Retrying with relaxed TLS verification.', [
+                'exception' => $e,
+                'url' => $url,
+            ]);
+
+            return $this->downloadWithTlsVerification($url, false);
+        }
+    }
+
+    protected function downloadWithTlsVerification($url, $verifyPeer)
     {
         $headers = [
             'User-Agent: PHP/' . \PHP_MAJOR_VERSION . '.' . \PHP_MINOR_VERSION,
@@ -59,14 +132,34 @@ class DirectPdfContentFetcher
                 'max_redirects' => 10,
                 'timeout' => 30,
             ],
+            'ssl' => [
+                'verify_peer' => $verifyPeer,
+                'verify_peer_name' => $verifyPeer,
+            ],
         ]);
 
-        $body = @file_get_contents($url, false, $context);
+        $errorMessage = null;
+        set_error_handler(static function ($type, $message) use (&$errorMessage) {
+            $errorMessage = $message;
+            return true;
+        });
+
+        try {
+            $body = @file_get_contents($url, false, $context);
+        } finally {
+            restore_error_handler();
+        }
+
         $responseHeaders = isset($http_response_header) ? $http_response_header : [];
         $response = $this->parseResponseHeaders($responseHeaders);
 
         if (false === $body) {
-            throw new \RuntimeException(sprintf('Unable to download PDF from "%s".', $url));
+            $message = sprintf('Unable to download PDF from "%s".', $url);
+            if (null !== $errorMessage) {
+                $message .= ' ' . $errorMessage;
+            }
+
+            throw new \RuntimeException($message);
         }
 
         $response['body'] = $body;
@@ -165,7 +258,7 @@ class DirectPdfContentFetcher
             return false;
         }
 
-        return 0 === preg_match('/\.(?:docx?|pdf|rtf|odt)\b/i', $title);
+        return 0 === preg_match('/\.(?:docx?|pdf|rtf|odt|dvi)\b/i', $title);
     }
 
     private function titleFromText($text)

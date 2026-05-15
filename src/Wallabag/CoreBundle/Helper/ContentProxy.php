@@ -40,7 +40,7 @@ class ContentProxy
         $this->fetchingErrorMessage = $fetchingErrorMessage;
         $this->storeArticleHeaders = $storeArticleHeaders;
         $this->pdfContentFormatter = $pdfContentFormatter ?: new PdfContentFormatter();
-        $this->directPdfContentFetcher = $directPdfContentFetcher ?: new DirectPdfContentFetcher();
+        $this->directPdfContentFetcher = $directPdfContentFetcher ?: new DirectPdfContentFetcher($logger);
     }
 
     /**
@@ -247,10 +247,23 @@ class ContentProxy
 
     private function fetchContent($url)
     {
+        $isDirectPdf = $this->directPdfContentFetcher->supports($url);
+
+        if ($isDirectPdf) {
+            try {
+                return $this->directPdfContentFetcher->fetch($url);
+            } catch (\Throwable $e) {
+                $this->logger->warning('Direct PDF fetch failed. Falling back to Graby.', [
+                    'exception' => $e,
+                    'url' => $url,
+                ]);
+            }
+        }
+
         try {
-            return $this->graby->fetchContent($url);
+            $content = $this->graby->fetchContent($url);
         } catch (\Throwable $e) {
-            if (!$this->directPdfContentFetcher->supports($url)) {
+            if (!$isDirectPdf) {
                 $this->throwFetchFailure($e);
             }
 
@@ -270,6 +283,43 @@ class ContentProxy
                 $this->throwFetchFailure($e);
             }
         }
+
+        if (!$this->shouldRetryWithDirectPdfFetcher($isDirectPdf, $content)) {
+            return $content;
+        }
+
+        $this->logger->warning('Graby returned failed content for a direct PDF. Retrying with the direct PDF fetcher.', [
+            'url' => $url,
+            'status' => isset($content['status']) ? $content['status'] : null,
+        ]);
+
+        try {
+            return $this->directPdfContentFetcher->fetch($url);
+        } catch (\Throwable $fallbackException) {
+            $this->logger->warning('Direct PDF fetch fallback failed after Graby returned failed content.', [
+                'exception' => $fallbackException,
+                'url' => $url,
+            ]);
+
+            return $content;
+        }
+    }
+
+    private function shouldRetryWithDirectPdfFetcher($isDirectPdf, array $content)
+    {
+        if (!$isDirectPdf) {
+            return false;
+        }
+
+        if (!isset($content['html']) || '' === trim((string) $content['html'])) {
+            return true;
+        }
+
+        if ($this->fetchingErrorMessage === $content['html']) {
+            return true;
+        }
+
+        return isset($content['status']) && (int) $content['status'] >= 400;
     }
 
     private function throwFetchFailure(\Throwable $e)

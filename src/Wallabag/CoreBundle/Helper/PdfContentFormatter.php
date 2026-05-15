@@ -4,6 +4,13 @@ namespace Wallabag\CoreBundle\Helper;
 
 class PdfContentFormatter
 {
+    private $pdfTextNormalizer;
+
+    public function __construct(?PdfTextNormalizer $pdfTextNormalizer = null)
+    {
+        $this->pdfTextNormalizer = $pdfTextNormalizer ?: new PdfTextNormalizer();
+    }
+
     public function format($content, $mimetype)
     {
         if (!$this->shouldFormat($content, $mimetype)) {
@@ -13,6 +20,7 @@ class PdfContentFormatter
         $text = preg_replace('~<br\s*/?>[ \t]*(?:\r\n|\r|\n)?~i', "\n", (string) $content);
         $text = html_entity_decode($text, \ENT_QUOTES | \ENT_HTML5, 'UTF-8');
         $text = str_replace(["\r\n", "\r"], "\n", $text);
+        $text = $this->pdfTextNormalizer->normalize($text);
         $text = preg_replace('/[ \t\x0B\f\x{00A0}]+/u', ' ', $text);
         $text = trim((string) $text);
 
@@ -77,6 +85,11 @@ class PdfContentFormatter
                 continue;
             }
 
+            if ($this->canKeepHyphenatedLine($paragraph, $line)) {
+                $paragraph .= $line;
+                continue;
+            }
+
             $paragraph .= ' ' . $line;
         }
 
@@ -86,7 +99,51 @@ class PdfContentFormatter
     private function canJoinHyphenatedLine($previousLine, $nextLine)
     {
         return 1 === preg_match('/[\p{L}]{2,}-$/u', $previousLine)
+            && !$this->endsWithHardHyphenPrefix($previousLine)
             && 1 === preg_match('/^\p{Ll}/u', $nextLine);
+    }
+
+    private function canKeepHyphenatedLine($previousLine, $nextLine)
+    {
+        return 1 === preg_match('/[\p{L}]{2,}-$/u', $previousLine)
+            && $this->endsWithHardHyphenPrefix($previousLine)
+            && 1 === preg_match('/^\p{Ll}/u', $nextLine);
+    }
+
+    private function endsWithHardHyphenPrefix($line)
+    {
+        if (0 === preg_match('/([\p{L}]+)-$/u', $line, $matches)) {
+            return false;
+        }
+
+        return \in_array(mb_strtolower($matches[1], 'UTF-8'), [
+            'anti',
+            'co',
+            'counter',
+            'cross',
+            'ex',
+            'extra',
+            'inter',
+            'intra',
+            'macro',
+            'micro',
+            'mid',
+            'mini',
+            'multi',
+            'non',
+            'over',
+            'post',
+            'pre',
+            'pro',
+            're',
+            'self',
+            'semi',
+            'sub',
+            'super',
+            'trans',
+            'ultra',
+            'under',
+        ], true);
     }
 
     private function normalizePunctuationSpacing($paragraph)

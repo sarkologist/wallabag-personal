@@ -31,6 +31,7 @@ RUN apt-get update && apt-get install -y \
         libzip-dev \
         libfreetype6-dev \
         zlib1g-dev \
+        poppler-utils \
         git \
         build-essential \
         nodejs

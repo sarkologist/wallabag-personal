@@ -51,6 +51,40 @@ class PdfContentFormatterTest extends TestCase
         );
     }
 
+    public function testRemovesPageFurnitureAndRepairsSoftHyphenatedPageWraps()
+    {
+        $formatter = new PdfContentFormatter();
+
+        $content = "Biology of Intentionality Francisco J. Varela<br />\nA different exercise--which I do not pursue here at all--is to see how this basic autopoietic organization becomes progressively complexi-<br />\n5\fBiology of Intentionality Francisco J. Varela<br />\nfied though reproductive mechanisms, artificial definition specific profiting is not intrinsic.<br />\n6\fBiology of Intentionality Francisco J. Varela<br />\nA final paragraph.";
+
+        $this->assertSame(
+            '<p>A different exercise--which I do not pursue here at all--is to see how this basic autopoietic organization becomes progressively complexified though reproductive mechanisms, artificial definition specific profiting is not intrinsic. A final paragraph.</p>',
+            $formatter->format($content, 'application/pdf')
+        );
+    }
+
+    public function testRemovesSpacedRunningHeadersAcrossPageJoins()
+    {
+        $formatter = new PdfContentFormatter();
+
+        $content = "So says Elizabeth Fisher. But no, this cannot be. Where is that wonderful, big, long, hard<br />\fTHE CARR IER BAG THE 0 R Y 0 F F I C T I 0 N 167<br />\nthing, a bone, I believe, that the Ape Man first bashed somebody with.<br />\fT H E C A R R I E R B A G T H E 0 R Y 0 F F I C T I 0 N 169<br />\nThe novel is a fundamentally unheroic kind of story.";
+
+        $this->assertSame(
+            '<p>So says Elizabeth Fisher. But no, this cannot be. Where is that wonderful, big, long, hard thing, a bone, I believe, that the Ape Man first bashed somebody with. The novel is a fundamentally unheroic kind of story.</p>',
+            $formatter->format($content, 'application/pdf')
+        );
+    }
+
+    public function testPreservesCommonHardHyphenatedLineWraps()
+    {
+        $formatter = new PdfContentFormatter();
+
+        $this->assertSame(
+            '<p>self-explanatory labels and complexification</p>',
+            $formatter->format('self-<br />explanatory<br />labels<br />and<br />complexi-<br />fication', 'application/pdf')
+        );
+    }
+
     public function testReturnsNonPdfContentUnchanged()
     {
         $formatter = new PdfContentFormatter();
