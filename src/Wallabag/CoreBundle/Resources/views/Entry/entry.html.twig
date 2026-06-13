@@ -323,6 +323,15 @@
             </div>
 
         </aside>
+        {% if entry.httpStatus is not empty and entry.httpStatus >= 400 and entry.content == fetching_error_message %}
+            <div class="card-panel yellow lighten-4 black-text" data-test="entry-fetch-error" data-http-status="{{ entry.httpStatus }}">
+                {{ 'entry.view.fetching_error.http_status'|trans({'%status%': entry.httpStatus}) }}
+                <a class="btn-flat" href="{{ path('browser_capture', {'id': entry.id}) }}" data-test="browser-capture-link">
+                    <i class="material-icons left">web</i>
+                    {{ 'entry.view.fetching_error.browser_capture'|trans }}
+                </a>
+            </div>
+        {% endif %}
         <article{% if entry.language is defined and entry.language is not null %} lang="{{ entry.getHTMLLanguage() }}"{% endif %}>
             {{ entry.content|pdfContent(entry.mimetype)|raw }}
         </article>

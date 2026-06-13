@@ -493,6 +493,126 @@ class EntryControllerTest extends WallabagCoreTestCase
         $this->assertStringContainsString($entry->getTitle(), $body[0]);
     }
 
+    public function testViewDisplaysHttpStatusForFetchFailure()
+    {
+        $this->logInAs('admin');
+        $client = $this->getTestClient();
+
+        $entry = new Entry($this->getLoggedInUser());
+        $entry->setUrl('https://aeon.co/essays/what-is-nick-lands-philosophy-of-accelerationism-really');
+        $entry->setTitle('Aeon fetch failure');
+        $entry->setContent($client->getContainer()->getParameter('wallabag_core.fetching_error_message'));
+        $entry->setHttpStatus(429);
+        $this->getEntityManager()->persist($entry);
+        $this->getEntityManager()->flush();
+
+        $crawler = $client->request('GET', '/view/' . $entry->getId());
+
+        $this->assertSame(200, $client->getResponse()->getStatusCode());
+
+        $fetchError = $crawler->filter('[data-test="entry-fetch-error"]');
+        $this->assertCount(1, $fetchError);
+        $this->assertSame('429', $fetchError->attr('data-http-status'));
+        $this->assertStringContainsString('entry.view.fetching_error.http_status', $fetchError->text());
+        $this->assertCount(1, $fetchError->filter('[data-test="browser-capture-link"]'));
+    }
+
+    public function testBrowserCaptureUpdatesFailedEntry()
+    {
+        $this->logInAs('admin');
+        $client = $this->getTestClient();
+
+        $entry = new Entry($this->getLoggedInUser());
+        $entry->setUrl('https://example.com/articles/bot-blocked');
+        $entry->setTitle('Fetch failed');
+        $entry->setContent($client->getContainer()->getParameter('wallabag_core.fetching_error_message'));
+        $entry->setHttpStatus(429);
+        $this->getEntityManager()->persist($entry);
+        $this->getEntityManager()->flush();
+
+        $crawler = $client->request('GET', '/browser-capture/' . $entry->getId());
+
+        $this->assertSame(200, $client->getResponse()->getStatusCode());
+        $bookmarklet = $crawler->filter('[data-test="browser-capture-bookmarklet"]');
+        $this->assertCount(1, $bookmarklet);
+        $this->assertStringStartsWith('javascript:', $bookmarklet->attr('href'));
+
+        $receiverUrl = $crawler->filter('[data-test="browser-capture-helper"]')->attr('data-receiver-url');
+        $receiver = $client->request('GET', $receiverUrl);
+
+        $this->assertSame(200, $client->getResponse()->getStatusCode());
+
+        $form = $receiver->filter('form[name="browser_capture"]')->form([
+            'title' => 'Captured article',
+            'source_url' => 'https://example.com/articles/bot-blocked',
+            'html' => '<!doctype html><html><body><article><h1>Captured article</h1><p>The browser supplied this article body.</p></article></body></html>',
+        ]);
+        $client->submit($form);
+
+        $this->assertSame(302, $client->getResponse()->getStatusCode());
+        $this->assertStringContainsString('/view/' . $entry->getId(), $client->getResponse()->headers->get('location'));
+
+        $this->getEntityManager()->clear();
+        $capturedEntry = $this->getEntityManager()->getRepository(Entry::class)->find($entry->getId());
+
+        $this->assertSame('Captured article', $capturedEntry->getTitle());
+        $this->assertStringContainsString('The browser supplied this article body.', $capturedEntry->getContent());
+        $this->assertNull($capturedEntry->getHttpStatus());
+    }
+
+    public function testBrowserCaptureRejectsAnotherUsersEntry()
+    {
+        $this->logInAs('admin');
+        $client = $this->getTestClient();
+
+        $bob = $this->getEntityManager()
+            ->getRepository(User::class)
+            ->findOneByUsername('bob');
+        $entry = new Entry($bob);
+        $entry->setUrl('https://example.com/bob-only');
+        $entry->setContent('Bob content');
+        $this->getEntityManager()->persist($entry);
+        $this->getEntityManager()->flush();
+
+        $client->request('GET', '/browser-capture/' . $entry->getId());
+
+        $this->assertSame(403, $client->getResponse()->getStatusCode());
+    }
+
+    public function testBrowserCaptureRejectsEmptyContent()
+    {
+        $this->logInAs('admin');
+        $client = $this->getTestClient();
+
+        $entry = new Entry($this->getLoggedInUser());
+        $entry->setUrl('https://example.com/articles/still-blocked');
+        $entry->setTitle('Still blocked');
+        $entry->setContent($client->getContainer()->getParameter('wallabag_core.fetching_error_message'));
+        $entry->setHttpStatus(429);
+        $this->getEntityManager()->persist($entry);
+        $this->getEntityManager()->flush();
+
+        $helper = $client->request('GET', '/browser-capture/' . $entry->getId());
+        $receiverUrl = $helper->filter('[data-test="browser-capture-helper"]')->attr('data-receiver-url');
+        $receiver = $client->request('GET', $receiverUrl);
+        $form = $receiver->filter('form[name="browser_capture"]')->form([
+            'title' => 'Empty capture',
+            'source_url' => 'https://example.com/articles/still-blocked',
+            'html' => '',
+        ]);
+        $client->submit($form);
+
+        $this->assertSame(302, $client->getResponse()->getStatusCode());
+        $this->assertStringContainsString('/browser-capture/' . $entry->getId(), $client->getResponse()->headers->get('location'));
+
+        $this->getEntityManager()->clear();
+        $unchangedEntry = $this->getEntityManager()->getRepository(Entry::class)->find($entry->getId());
+
+        $this->assertSame('Still blocked', $unchangedEntry->getTitle());
+        $this->assertSame($client->getContainer()->getParameter('wallabag_core.fetching_error_message'), $unchangedEntry->getContent());
+        $this->assertSame('429', $unchangedEntry->getHttpStatus());
+    }
+
     /**
      * @group NetworkCalls
      */

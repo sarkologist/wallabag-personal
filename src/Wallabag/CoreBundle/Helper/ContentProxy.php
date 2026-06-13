@@ -285,7 +285,7 @@ class ContentProxy
         }
 
         if (!$this->shouldRetryWithDirectPdfFetcher($isDirectPdf, $content)) {
-            return $content;
+            return $this->markHttpErrorAsFetchFailure($isDirectPdf, $content);
         }
 
         $this->logger->warning('Graby returned failed content for a direct PDF. Retrying with the direct PDF fetcher.', [
@@ -320,6 +320,23 @@ class ContentProxy
         }
 
         return isset($content['status']) && (int) $content['status'] >= 400;
+    }
+
+    private function markHttpErrorAsFetchFailure($isDirectPdf, array $content)
+    {
+        if ($isDirectPdf || !isset($content['status']) || (int) $content['status'] < 400) {
+            return $content;
+        }
+
+        $this->logger->warning('Graby returned an HTTP error response. Treating content as a fetch failure.', [
+            'url' => isset($content['url']) ? $content['url'] : null,
+            'status' => $content['status'],
+        ]);
+
+        $content['title'] = '';
+        $content['html'] = $this->fetchingErrorMessage;
+
+        return $content;
     }
 
     private function throwFetchFailure(\Throwable $e)

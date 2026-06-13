@@ -16,6 +16,8 @@ use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Exception\BadRequestHttpException;
 use Symfony\Component\Routing\Annotation\Route;
+use Symfony\Component\Routing\Generator\UrlGeneratorInterface;
+use Symfony\Component\Security\Csrf\CsrfTokenManagerInterface;
 use Symfony\Contracts\Translation\TranslatorInterface;
 use Wallabag\CoreBundle\Entity\Entry;
 use Wallabag\CoreBundle\Entity\Tag;
@@ -40,8 +42,9 @@ class EntryController extends AbstractController
     private PreparePagerForEntries $preparePagerForEntriesHelper;
     private FilterBuilderUpdaterInterface $filterBuilderUpdater;
     private ContentProxy $contentProxy;
+    private CsrfTokenManagerInterface $csrfTokenManager;
 
-    public function __construct(EntityManagerInterface $entityManager, EventDispatcherInterface $eventDispatcher, EntryRepository $entryRepository, Redirect $redirectHelper, PreparePagerForEntries $preparePagerForEntriesHelper, FilterBuilderUpdaterInterface $filterBuilderUpdater, ContentProxy $contentProxy)
+    public function __construct(EntityManagerInterface $entityManager, EventDispatcherInterface $eventDispatcher, EntryRepository $entryRepository, Redirect $redirectHelper, PreparePagerForEntries $preparePagerForEntriesHelper, FilterBuilderUpdaterInterface $filterBuilderUpdater, ContentProxy $contentProxy, CsrfTokenManagerInterface $csrfTokenManager)
     {
         $this->entityManager = $entityManager;
         $this->eventDispatcher = $eventDispatcher;
@@ -50,6 +53,7 @@ class EntryController extends AbstractController
         $this->preparePagerForEntriesHelper = $preparePagerForEntriesHelper;
         $this->filterBuilderUpdater = $filterBuilderUpdater;
         $this->contentProxy = $contentProxy;
+        $this->csrfTokenManager = $csrfTokenManager;
     }
 
     /**
@@ -397,8 +401,115 @@ class EntryController extends AbstractController
 
         return $this->render(
             '@WallabagCore/Entry/entry.html.twig',
-            ['entry' => $entry]
+            [
+                'entry' => $entry,
+                'fetching_error_message' => $this->getParameter('wallabag_core.fetching_error_message'),
+            ]
         );
+    }
+
+    /**
+     * Show the browser-assisted capture helper for an entry.
+     *
+     * @Route("/browser-capture/{id}", name="browser_capture", methods={"GET"}, requirements={"id" = "\d+"})
+     */
+    public function browserCaptureAction(Entry $entry)
+    {
+        $this->checkUserAction($entry);
+
+        $token = (string) $this->csrfTokenManager->getToken($this->getBrowserCaptureTokenId($entry));
+        $receiverUrl = $this->generateUrl('browser_capture_receiver', [
+            'id' => $entry->getId(),
+            'token' => $token,
+        ], UrlGeneratorInterface::ABSOLUTE_URL);
+
+        return $this->render('@WallabagCore/Entry/browser_capture.html.twig', [
+            'entry' => $entry,
+            'receiver_url' => $receiverUrl,
+            'bookmarklet' => $this->buildBrowserCaptureBookmarklet($entry, $receiverUrl),
+        ]);
+    }
+
+    /**
+     * Receive captured content from the source-page bookmarklet.
+     *
+     * @Route("/browser-capture/{id}/receiver", name="browser_capture_receiver", methods={"GET"}, requirements={"id" = "\d+"})
+     */
+    public function browserCaptureReceiverAction(Request $request, Entry $entry)
+    {
+        $this->checkUserAction($entry);
+
+        if (!$this->isCsrfTokenValid($this->getBrowserCaptureTokenId($entry), $request->query->get('token'))) {
+            throw new BadRequestHttpException('Bad CSRF token.');
+        }
+
+        return $this->render('@WallabagCore/Entry/browser_capture_receiver.html.twig', [
+            'entry' => $entry,
+            'token' => $request->query->get('token'),
+        ]);
+    }
+
+    /**
+     * Save browser-captured content without fetching the source URL again.
+     *
+     * @Route("/browser-capture/{id}", name="browser_capture_save", methods={"POST"}, requirements={"id" = "\d+"})
+     */
+    public function saveBrowserCaptureAction(Request $request, Entry $entry)
+    {
+        if (!$this->isCsrfTokenValid($this->getBrowserCaptureTokenId($entry), $request->request->get('token'))) {
+            throw new BadRequestHttpException('Bad CSRF token.');
+        }
+
+        $this->checkUserAction($entry);
+
+        $html = trim((string) $request->request->get('html'));
+        $sourceUrl = trim((string) $request->request->get('source_url'));
+        if ('' === $html || !$this->isCaptureSourceAllowed($entry, $sourceUrl)) {
+            $this->addFlash('notice', 'flashes.entry.notice.browser_capture_failed');
+
+            return $this->redirectToRoute('browser_capture', ['id' => $entry->getId()]);
+        }
+
+        $previousTitle = $entry->getTitle();
+        $previousContent = $entry->getContent();
+        $previousHttpStatus = $entry->getHttpStatus();
+
+        try {
+            $this->contentProxy->updateEntry(
+                $entry,
+                $entry->getUrl(),
+                [
+                    'title' => trim((string) $request->request->get('title')),
+                    'html' => $html,
+                    'url' => $entry->getUrl(),
+                ],
+                true
+            );
+        } catch (\Exception $e) {
+            $entry->setTitle($previousTitle);
+            $entry->setContent($previousContent);
+            $entry->setHttpStatus($previousHttpStatus);
+            $this->addFlash('notice', 'flashes.entry.notice.browser_capture_failed');
+
+            return $this->redirectToRoute('browser_capture', ['id' => $entry->getId()]);
+        }
+
+        if ($this->getParameter('wallabag_core.fetching_error_message') === $entry->getContent()) {
+            $entry->setTitle($previousTitle);
+            $entry->setContent($previousContent);
+            $entry->setHttpStatus($previousHttpStatus);
+            $this->addFlash('notice', 'flashes.entry.notice.browser_capture_failed');
+
+            return $this->redirectToRoute('browser_capture', ['id' => $entry->getId()]);
+        }
+
+        $entry->setHttpStatus(null);
+        $this->entityManager->persist($entry);
+        $this->entityManager->flush();
+        $this->eventDispatcher->dispatch(new EntrySavedEvent($entry), EntrySavedEvent::NAME);
+        $this->addFlash('notice', 'flashes.entry.notice.browser_capture_saved');
+
+        return $this->redirectToRoute('view', ['id' => $entry->getId()]);
     }
 
     /**
@@ -751,6 +862,54 @@ class EntryController extends AbstractController
         if (null === $this->getUser() || $this->getUser()->getId() !== $entry->getUser()->getId()) {
             throw $this->createAccessDeniedException('You can not access this entry.');
         }
+    }
+
+    private function getBrowserCaptureTokenId(Entry $entry)
+    {
+        return 'browser-capture-' . $entry->getId();
+    }
+
+    private function isCaptureSourceAllowed(Entry $entry, $sourceUrl)
+    {
+        $entryHost = parse_url($entry->getUrl(), \PHP_URL_HOST);
+        $sourceHost = parse_url($sourceUrl, \PHP_URL_HOST);
+
+        if (empty($entryHost) || empty($sourceHost)) {
+            return false;
+        }
+
+        $normalizeHost = static function ($host) {
+            return preg_replace('/^www\./i', '', strtolower($host));
+        };
+
+        return $normalizeHost($entryHost) === $normalizeHost($sourceHost);
+    }
+
+    private function buildBrowserCaptureBookmarklet(Entry $entry, $receiverUrl)
+    {
+        $receiverUrl = json_encode($receiverUrl, \JSON_HEX_TAG | \JSON_HEX_APOS | \JSON_HEX_AMP | \JSON_HEX_QUOT);
+        $windowName = json_encode('wallabag-browser-capture-' . $entry->getId());
+
+        return 'javascript:(function(){'
+            . 'var receiverUrl=' . $receiverUrl . ';'
+            . 'var receiverOrigin=(new URL(receiverUrl)).origin;'
+            . 'var receiverWindow;'
+            . 'function receive(event){'
+            . 'if(event.source!==receiverWindow||event.origin!==receiverOrigin||!event.data||event.data.type!=="wallabag-browser-capture-ready"){return;}'
+            . 'window.removeEventListener("message",receive);'
+            . 'var canonical=document.querySelector(\'link[rel="canonical"]\');'
+            . 'var container=document.querySelector("article")||document.querySelector("main")||document.body;'
+            . 'receiverWindow.postMessage({'
+            . 'type:"wallabag-browser-capture",'
+            . 'title:document.title||"",'
+            . 'url:canonical&&canonical.href?canonical.href:window.location.href,'
+            . 'html:container?container.outerHTML:""'
+            . '},receiverOrigin);'
+            . '}'
+            . 'window.addEventListener("message",receive);'
+            . 'receiverWindow=window.open(receiverUrl,' . $windowName . ',"width=560,height=360");'
+            . 'if(!receiverWindow){window.removeEventListener("message",receive);}'
+            . '})();';
     }
 
     /**

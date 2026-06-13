@@ -1,0 +1,26 @@
+{% extends "@WallabagCore/layout.html.twig" %}
+
+{% block title %}{{ 'entry.browser_capture.page_title'|trans }}{% endblock %}
+
+{% block content %}
+    <div class="row" data-test="browser-capture-helper" data-receiver-url="{{ receiver_url }}">
+        <div class="col s12">
+            <p>{{ entry.title|striptags }}</p>
+
+            <p>
+                <a class="btn waves-effect waves-light" href="{{ entry.url|e }}" target="_blank" rel="noopener">
+                    <i class="material-icons left">open_in_new</i>
+                    {{ 'entry.browser_capture.open_original'|trans }}
+                </a>
+            </p>
+
+            <p>{{ 'entry.browser_capture.bookmarklet_instruction'|trans }}</p>
+            <p>
+                <a class="btn waves-effect waves-light" href="{{ bookmarklet }}" data-test="browser-capture-bookmarklet">
+                    <i class="material-icons left">save_alt</i>
+                    {{ 'entry.browser_capture.bookmarklet'|trans }}
+                </a>
+            </p>
+        </div>
+    </div>
+{% endblock %}

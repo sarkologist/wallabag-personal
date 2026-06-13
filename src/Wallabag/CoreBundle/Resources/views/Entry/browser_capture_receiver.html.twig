@@ -1,0 +1,50 @@
+{% extends "@WallabagCore/layout.html.twig" %}
+
+{% block title %}{{ 'entry.browser_capture.receiver_title'|trans }}{% endblock %}
+
+{% block content %}
+    <div class="row">
+        <div class="col s12">
+            <p id="browser-capture-status">{{ 'entry.browser_capture.waiting'|trans }}</p>
+
+            <form name="browser_capture" action="{{ path('browser_capture_save', {'id': entry.id}) }}" method="post">
+                <input type="hidden" name="token" value="{{ token }}">
+                <input type="hidden" name="title">
+                <input type="hidden" name="source_url">
+                <textarea name="html" class="hide"></textarea>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            var openerWindow = window.opener;
+            var status = document.getElementById('browser-capture-status');
+            var form = document.forms.browser_capture;
+
+            if (!openerWindow) {
+                status.textContent = '{{ 'entry.browser_capture.no_source'|trans|escape('js') }}';
+                return;
+            }
+
+            window.addEventListener('message', function (event) {
+                if (event.source !== openerWindow || !event.data || event.data.type !== 'wallabag-browser-capture') {
+                    return;
+                }
+
+                if (typeof event.data.html !== 'string' || typeof event.data.url !== 'string') {
+                    status.textContent = '{{ 'entry.browser_capture.failed'|trans|escape('js') }}';
+                    return;
+                }
+
+                form.elements.title.value = typeof event.data.title === 'string' ? event.data.title : '';
+                form.elements.source_url.value = event.data.url;
+                form.elements.html.value = event.data.html;
+                status.textContent = '{{ 'entry.browser_capture.saving'|trans|escape('js') }}';
+                form.submit();
+            });
+
+            openerWindow.postMessage({type: 'wallabag-browser-capture-ready'}, '*');
+        }());
+    </script>
+{% endblock %}

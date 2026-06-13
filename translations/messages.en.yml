@@ -305,6 +305,19 @@ entry:
         published_at: Publication date
         published_by: Published by
         provided_by: Provided by
+        fetching_error:
+            http_status: 'Fetching failed because the source site returned HTTP status %status%; it may be rate-limiting or blocking automated requests.'
+            browser_capture: Capture from browser
+    browser_capture:
+        page_title: Browser capture
+        open_original: Open original article
+        bookmarklet_instruction: Drag this button to your bookmarks, open the original article, clear any site check, then use the bookmark.
+        bookmarklet: Capture this article
+        receiver_title: Browser capture
+        waiting: Waiting for the article page...
+        saving: Saving captured article...
+        failed: The article page did not provide valid content.
+        no_source: Open this window by using the capture bookmark on the original article.
     new:
         page_title: Save new entry
         placeholder: http://website.com
@@ -697,6 +710,8 @@ flashes:
             entry_updated: Entry updated
             entry_reloaded: Entry reloaded
             entry_reloaded_failed: Entry reloaded but fetching content failed
+            browser_capture_saved: Article captured from the browser
+            browser_capture_failed: Browser capture failed
             entry_archived: Entry archived
             entry_unarchived: Entry unarchived
             entry_starred: Entry starred

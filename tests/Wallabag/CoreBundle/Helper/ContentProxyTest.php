@@ -142,6 +142,55 @@ class ContentProxyTest extends TestCase
         $this->assertSame('domain.io', $entry->getDomainName());
     }
 
+    public function testHttpErrorContentIsTreatedAsFetchFailure()
+    {
+        $tagger = $this->getTaggerMock();
+        $tagger->expects($this->once())
+            ->method('tag');
+
+        $ruleBasedIgnoreOriginProcessor = $this->getRuleBasedIgnoreOriginProcessorMock();
+
+        $graby = $this->getMockBuilder(Graby::class)
+            ->setMethods(['fetchContent'])
+            ->disableOriginalConstructor()
+            ->getMock();
+
+        $graby->expects($this->once())
+            ->method('fetchContent')
+            ->willReturn([
+                'html' => 'Access Denied <p>You do not have permission to access this article.</p>',
+                'title' => 'Access Denied',
+                'url' => 'https://www.mdpi.com/1099-4300/23/11/1467',
+                'headers' => [
+                    'content-type' => 'text/html',
+                ],
+                'language' => '',
+                'status' => 403,
+            ]);
+
+        $directPdfContentFetcher = $this->getMockBuilder(DirectPdfContentFetcher::class)
+            ->setMethods(['supports', 'fetch'])
+            ->getMock();
+
+        $directPdfContentFetcher->expects($this->once())
+            ->method('supports')
+            ->with('https://www.mdpi.com/1099-4300/23/11/1467')
+            ->willReturn(false);
+
+        $directPdfContentFetcher->expects($this->never())
+            ->method('fetch');
+
+        $proxy = new ContentProxy($graby, $tagger, $ruleBasedIgnoreOriginProcessor, $this->getValidator(), $this->getLogger(), $this->fetchingErrorMessage, false, null, $directPdfContentFetcher);
+        $entry = new Entry(new User());
+        $proxy->updateEntry($entry, 'https://www.mdpi.com/1099-4300/23/11/1467');
+
+        $this->assertEmpty($entry->getTitle());
+        $this->assertSame($this->fetchingErrorMessage, $entry->getContent());
+        $this->assertSame(403, $entry->getHttpStatus());
+        $this->assertSame('text/html', $entry->getMimetype());
+        $this->assertSame(0.0, $entry->getReadingTime());
+    }
+
     public function testPdfContentIsFormattedBeforeStorage()
     {
         $tagger = $this->getTaggerMock();
